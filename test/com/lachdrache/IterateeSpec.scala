@@ -73,7 +73,7 @@ class IterateeSpec extends FunSpec with OneAppPerSuite {
       val enumerator: Enumerator[String] = Enumerator.generateM(
         Promise.timeout(
           Some("current time %s".format(new java.util.Date())),
-          500
+          1
         )
       )
       val future: Future[Option[String]] = enumerator.run(Iteratee.head)
@@ -82,6 +82,26 @@ class IterateeSpec extends FunSpec with OneAppPerSuite {
     }
   }
 
+  describe("reusing an iteratee") {
+    val iteratee: Iteratee[Int, Int] = Iteratee.fold[Int, Int](0)((total, el) => total + el)
+
+    it("for 3 ints") {
+      val enumerator = Enumerator(1,2,3)
+      enumerator(iteratee)
+      assertResult(6) {
+        val future: Future[Int] = enumerator.run(iteratee)
+        await(future)
+      }
+    }
+
+    it("for 5 ints") {
+      val enumerator: Enumerator[Int] = Enumerator(1,2,3,4,5)
+      enumerator(iteratee)
+      assertResult(15) {
+        await(enumerator.run(iteratee))
+      }
+    }
+  }
 
 
 
