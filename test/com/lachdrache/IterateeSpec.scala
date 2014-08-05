@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import org.scalatest.FunSpec
 import org.scalatestplus.play.OneAppPerSuite
 import play.api.libs.concurrent.Promise
-import play.api.libs.iteratee.{Enumerator, Input, Iteratee, Step}
+import play.api.libs.iteratee._
 import play.api.test.Helpers._
 import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -103,6 +103,48 @@ class IterateeSpec extends FunSpec with OneAppPerSuite {
     }
   }
 
+  describe("getChunks on Iteratee companion object") {
+    it("should return all chunks") {
+      val enumerator = Enumerator(1,2,13)
+      assertResult(List(1,2,13)) {
+        val future: Future[List[Int]] = enumerator run Iteratee.getChunks
+        await(future)
+      }
+    }
+  }
 
+  describe("Iteratee computing the total of the 2 first elements") {
+    def total2Chunks: Iteratee[Int, Int] = {
+      def step(idx: Int, total: Int)(i: Input[Int]): Iteratee[Int, Int] = i match {
+        case Input.EOF | Input.Empty => Done(total, Input.EOF)
+        case Input.El(e) => if (idx < 2) Cont[Int, Int](i => step(idx+1, total + e)(i))
+                            else Done(total, Input.EOF)
+
+      }
+      Cont[Int, Int](i => step(0, 0)(i))
+    }
+
+    it("should return 30") {
+      assertResult(30) {
+        val future: Future[Int] = Enumerator(10, 20, 5) run total2Chunks
+        await(future)
+      }
+    }
+
+    it("will even work for an never-ending enumerator") {
+      awaitAndAssert(2) {
+        Enumerator.repeat(1) run total2Chunks
+      }
+    }
+
+  }
+
+  def awaitAndAssert[A](expected: A)(thunk: => Future[A]) {
+    assertResult(expected) {
+      await {
+        thunk
+      }
+    }
+  }
 
 }
