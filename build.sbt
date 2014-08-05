@@ -8,6 +8,7 @@ scalaVersion := "2.11.2"
 
 lazy val root = (project in file(".")).enablePlugins(PlayScala)
 
-libraryDependencies += "org.scalatest" %% "scalatest" % "2.2.1" % "test"
+// http://www.playframework.com/documentation/2.3.x/ScalaTestingWithScalaTest
+libraryDependencies += "org.scalatestplus" %% "play" % "1.1.0" % "test"
 
 
