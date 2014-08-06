@@ -119,7 +119,6 @@ class IterateeSpec extends FunSpec with OneAppPerSuite {
         case Input.EOF | Input.Empty => Done(total, Input.EOF)
         case Input.El(e) => if (idx < 2) Cont[Int, Int](i => step(idx+1, total + e)(i))
                             else Done(total, Input.EOF)
-
       }
       Cont[Int, Int](i => step(0, 0)(i))
     }
@@ -136,8 +135,58 @@ class IterateeSpec extends FunSpec with OneAppPerSuite {
         Enumerator.repeat(1) run total2Chunks
       }
     }
-
   }
+
+  describe("types matter") {
+    val iterator = Iteratee.fold[Int, Int](0)((total, el) => total + el)
+    val enumerator = Enumerator(1, 234, 455, 987)
+
+    it("difference between Enumerator.apply and Enumerator.run") {
+      val totalIteratee: Future[Iteratee[Int, Int]] = enumerator apply iterator
+      val total: Future[Int] = enumerator run iterator
+    }
+
+    it("Iteratee is a Future[Iteratee") {
+      val future: Future[Iteratee[Int, Int]] = enumerator apply iterator
+      val it: Iteratee[Int, Int] = Iteratee.flatten(future)
+
+      // converts an Iteratee to a Future[Iteratee]
+      val future1: Future[Iteratee[Int, Int]] = Future.successful(it)
+      val future2: Future[Iteratee[Int, Int]] = it.unflatten.map(_.it)
+    }
+  }
+
+  describe("enumeratee") {
+    val enumerator = Enumerator(1, 2, 3)
+    val iteratee: Iteratee[String, List[String]] = Iteratee.getChunks[String]
+
+    it("should convert ints to strings") {
+      awaitAndAssert(List("1", "2", "3")) {
+        val future: Future[List[String]] = enumerator through Enumeratee.map(_.toString) run iteratee
+        future
+      }
+    }
+
+    it("in two steps") {
+      val e: Enumerator[String] = enumerator through Enumeratee.map(_.toString)
+      awaitAndAssert(List("1", "2", "3")) {
+        e run iteratee
+      }
+    }
+  }
+
+  describe("enumeratee can transform an iteratee") {
+    val stringIteratee: Iteratee[String, List[String]] = Iteratee.getChunks[String]
+    val intIteratee: Iteratee[Int, List[String]] = Enumeratee.map[Int](_.toString) transform stringIteratee
+
+    it("running intIteratee") {
+      awaitAndAssert(List("1", "2", "3")) {
+        Enumerator(1, 2, 3) run intIteratee
+      }
+    }
+  }
+
+
 
   def awaitAndAssert[A](expected: A)(thunk: => Future[A]) {
     assertResult(expected) {
