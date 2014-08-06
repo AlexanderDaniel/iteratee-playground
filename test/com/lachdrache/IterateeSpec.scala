@@ -186,7 +186,17 @@ class IterateeSpec extends FunSpec with OneAppPerSuite {
     }
   }
 
+  describe("enumeratee can be composed with an enumeratee") {
+    val enumeratee1: Enumeratee[String, Int] = Enumeratee.map[String](_.toInt)
+    val enumeratee2: Enumeratee[Int, Option[Int]] = Enumeratee.map[Int](Some(_))
+    val enumerateeComposed: Enumeratee[String, Option[Int]] = enumeratee1 compose enumeratee2
 
+    it("running composed enumeratee") {
+      awaitAndAssert(List[Option[Int]](Some(13), Some(17))) {
+        Enumerator("13", "17") through enumerateeComposed run Iteratee.getChunks[Option[Int]]
+      }
+    }
+  }
 
   def awaitAndAssert[A](expected: A)(thunk: => Future[A]) {
     assertResult(expected) {
