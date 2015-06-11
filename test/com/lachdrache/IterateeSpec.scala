@@ -198,6 +198,112 @@ class IterateeSpec extends FunSpec with OneAppPerSuite {
     }
   }
 
+  // http://jazzy.id.au/default/2012/11/06/iteratees_for_imperative_programmers.html
+  def dropWhile(p: Char => Boolean): Iteratee[Char, Unit] = Cont {
+    case in@Input.El(char) if !p(char) => Done(Unit, in)
+    case in@Input.EOF => Done(Unit, in)
+    case _ => dropWhile(p)
+  }
+
+  def dropSpaces = dropWhile(c => c.isWhitespace)
+
+  def takeWhile(p: Char => Boolean, data: Seq[Char] = IndexedSeq[Char]()): Iteratee[Char, Seq[Char]] = Cont {
+    case in@Input.El(char) => if (p(char)) {
+      takeWhile(p, data :+ char)
+    } else {
+      Done(data, in)
+    }
+    case in@Input.EOF => Done(data, in)
+    case _ => takeWhile(p, data)
+  }
+
+  describe("takeWhile") {
+    it("some characters are remaining") {
+      val enumerator: Enumerator[Char] = Enumerator("abc,".toList:_*)
+      awaitAndAssert(Seq('a', 'b', 'c')) {
+        enumerator run takeWhile(_!=',')
+      }
+    }
+
+    it("stops at EOF") {
+      val enumerator: Enumerator[Char] = Enumerator('a', 'b')
+      awaitAndAssert(Seq('a', 'b')) {
+        enumerator run takeWhile(_ != ',')
+      }
+    }
+  }
+
+  def peek: Iteratee[Char, Option[Char]] = Cont {
+    case in@Input.El(char) => Done(Some(char), in)
+    case in@Input.EOF => Done(None, in)
+    case _ => peek
+  }
+
+  def takeOne: Iteratee[Char, Option[Char]] = Cont {
+    case in@Input.El(char) => Done(Some(char))
+    case in@Input.EOF => Done(None, in)
+    case _ => takeOne
+  }
+
+  def expect(char: Char): Iteratee[Char, Unit] =
+    takeOne.flatMap {
+      case Some(c) if c==char => Done(Unit)
+      case Some(c) => Error(s"Expected $char but got $c", Input.El(c))
+      case None => Error(s"Premature end of input, expected: $char", Input.EOF)
+    }
+
+  def unquoted = takeWhile(c => c != ',' && c != '\n') map (_.mkString.trim)
+
+  def quotedWithoutSupportForEscapedQuotes = for {
+    _ <- expect('"')
+    value <- takeWhile(_ != '"')
+    _ <- expect('"')
+  } yield value.mkString
+
+  def quoted(value: Seq[Char] = IndexedSeq[Char]()): Iteratee[Char, String] = for {
+    _ <- expect('"')
+    chars <- takeWhile(_ != '"')
+    _ <- expect('"')
+    nextChar <- peek
+    value <- nextChar match {
+      case Some('"') => quoted(value ++ chars :+ '"')
+      case _ => Done[Char, String]((value ++ chars).mkString)
+    }
+  } yield value
+
+  def value = for {
+    char <- peek
+    v <- char match {
+      case Some('"') => quoted()
+      case None => Error[Char]("premature end of input, expected a value", Input.EOF)
+      case _ => unquoted
+    }
+  } yield v
+
+  def values(state: Seq[String] = IndexedSeq[String]()): Iteratee[Char, Seq[String]] = for {
+    _ <- dropSpaces
+    v <- value
+    _ <- dropSpaces
+    nextChar <- takeOne
+    vs <- nextChar match {
+      case Some('\n') | None => Done[Char, Seq[String]](state :+ v)
+      case Some(',') => values(state :+ v)
+      case Some(other) => Error(s"Expected comma, newline or EOF, but found $other", Input.El(other))
+    }
+  } yield vs
+
+  def csv: Enumeratee[Char, Seq[String]] = Enumeratee.grouped(values())
+
+  // From the Scaladoc of [[Enumeratee.grouped]]
+  def takeLine: Iteratee[Char, String] = for {
+    line <- Enumeratee.takeWhile[Char](_ != '\n') transform Iteratee.getChunks
+    _ <- Enumeratee.take(1) &>> Iteratee.ignore[Char]
+  } yield line.mkString
+
+  def asLinesEnumeratee: Enumeratee[Char, String] = Enumeratee.grouped(takeLine)
+
+  def asLinesIteratee: Iteratee[Char, List[String]] = asLinesEnumeratee transform Iteratee.getChunks
+
   def awaitAndAssert[A](expected: A)(thunk: => Future[A]) {
     assertResult(expected) {
       await {
